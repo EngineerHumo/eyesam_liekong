@@ -106,14 +106,14 @@ def process_split(
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    case_dirs = sorted([p for p in input_dir.iterdir() if p.is_dir() and p.name.startswith("case_")])
+    case_dirs = sorted([p for p in input_dir.iterdir() if p.is_dir() and p.name.startswith("")])
     if not case_dirs:
         logging.warning("No case folders found in %s", input_dir)
 
     counter = start_index
     for case_dir in case_dirs:
         image_path = case_dir / "image.png"
-        mask_path = case_dir / "aux_3.png"
+        mask_path = case_dir / "gt_1.png"
         if not image_path.exists():
             logging.warning("Missing image.png in %s, skipping.", case_dir)
             continue
@@ -156,7 +156,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--root",
         type=Path,
-        default=Path("/home/wensheng/gjq_workspace/eyesam/data/Retina_Project_seg"),
+        default=Path("/home/wensheng/gjq_workspace/eyesam_liekong/data/Retina_Project_liekong"),
         help="Root directory containing train/ and val/ folders.",
     )
     parser.add_argument(
@@ -172,7 +172,7 @@ def parse_args() -> argparse.Namespace:
         help="Output directory for validation NPZ files.",
     )
     parser.add_argument("--train-start", type=int, default=1, help="Starting index for training NPZ filenames.")
-    parser.add_argument("--val-start", type=int, default=1, help="Starting index for validation NPZ filenames.")
+    parser.add_argument("--val-start", type=int, default=256, help="Starting index for validation NPZ filenames.")
     return parser.parse_args()
 
 

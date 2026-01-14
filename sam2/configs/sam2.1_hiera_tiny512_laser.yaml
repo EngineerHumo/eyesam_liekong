@@ -13,7 +13,7 @@ scratch:
 
 dataset:
   # PATHS to Dataset
-  folder: /home/wensheng/gjq_workspace/eyesam/data/Retina_Project  # Root path containing train/ and val/ splits
+  folder: /home/wensheng/gjq_workspace/eyesam_liekong/data/Retina_Project_liekong  # Root path containing train/ and val/ splits
   multiplier: 1
 
 # Video transforms
@@ -236,7 +236,7 @@ trainer:
               training: true
               video_dataset:
                 _target_: training.dataset.vos_raw_dataset.NPZRawDataset
-                folder: /home/wensheng/gjq_workspace/eyesam/data/Retina_Project/train_npz # must be absolute path
+                folder: /home/wensheng/gjq_workspace/eyesam_liekong/data/Retina_Project_liekong/train_npz # must be absolute path
               sampler:
                 _target_: training.dataset.vos_sampler.RandomUniformSampler
                 num_frames: ${scratch.num_frames}
@@ -267,7 +267,7 @@ trainer:
               training: false
               video_dataset:
                 _target_: training.dataset.vos_raw_dataset.NPZRawDataset
-                folder: /home/wensheng/gjq_workspace/eyesam/data/Retina_Project/val_npz
+                folder: /home/wensheng/gjq_workspace/eyesam_liekong/data/Retina_Project_liekong/val_npz
               sampler:
                 _target_: training.dataset.vos_sampler.RandomUniformSampler
                 num_frames: ${scratch.num_frames}
