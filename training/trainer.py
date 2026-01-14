@@ -489,7 +489,13 @@ class Trainer:
         if phase == Phase.VAL:
             dice_metrics = self._compute_val_dice_metrics(outputs, targets)
             if dice_metrics is not None:
-                second_click_dice, third_click_dice, final_iter_dice = dice_metrics
+                (
+                    first_click_dice,
+                    second_click_dice,
+                    third_click_dice,
+                    final_iter_dice,
+                ) = dice_metrics
+                step_losses["Dice/val_first_click"] = first_click_dice
                 step_losses["Dice/val_second_click"] = second_click_dice
                 step_losses["Dice/val_third_click"] = third_click_dice
                 step_losses["Dice/val_final_iter"] = final_iter_dice
@@ -530,10 +536,11 @@ class Trainer:
 
     def _compute_val_dice_metrics(
         self, outputs: List[Dict[str, torch.Tensor]], targets: torch.Tensor
-    ) -> Optional[Tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
+    ) -> Optional[Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]]:
         if not outputs:
             return None
 
+        first_dices = []
         second_dices = []
         third_dices = []
         final_dices = []
@@ -545,9 +552,11 @@ class Trainer:
                 continue
 
             frame_targets = frame_targets.float()
+            first_pred = pred_steps[:, 0]
             second_pred = pred_steps[:, 1]
             third_pred = pred_steps[:, 2]
             final_pred = pred_steps[:, -1]
+            first_dices.append(self._compute_dice(first_pred, frame_targets))
             second_dices.append(self._compute_dice(second_pred, frame_targets))
             third_dices.append(self._compute_dice(third_pred, frame_targets))
             final_dices.append(self._compute_dice(final_pred, frame_targets))
@@ -556,6 +565,7 @@ class Trainer:
             return None
 
         return (
+            torch.stack(first_dices).mean(),
             torch.stack(second_dices).mean(),
             torch.stack(third_dices).mean(),
             torch.stack(final_dices).mean(),
@@ -816,11 +826,13 @@ class Trainer:
 
     def _maybe_save_topk_dice_checkpoints(self, out_dict: Mapping[str, Any]) -> None:
         if (
-            "Dice/val_second_click" not in out_dict
+            "Dice/val_first_click" not in out_dict
+            or "Dice/val_second_click" not in out_dict
             or "Dice/val_third_click" not in out_dict
             or "Dice/val_final_iter" not in out_dict
         ):
             return
+        first_click = float(out_dict["Dice/val_first_click"])
         second_click = float(out_dict["Dice/val_second_click"])
         third_click = float(out_dict["Dice/val_third_click"])
         final_iter = float(out_dict["Dice/val_final_iter"])
@@ -828,6 +840,7 @@ class Trainer:
 
         entry = {
             "epoch": epoch,
+            "dice_first_click": first_click,
             "dice_second_click": second_click,
             "dice_third_click": third_click,
             "dice_final_iter": final_iter,
@@ -846,7 +859,8 @@ class Trainer:
             return
 
         ckpt_name = (
-            f"best_dice_epoch_{epoch:04d}_second_{self._format_metric_for_ckpt_name(second_click)}"
+            f"best_dice_epoch_{epoch:04d}_first_{self._format_metric_for_ckpt_name(first_click)}"
+            f"_second_{self._format_metric_for_ckpt_name(second_click)}"
             f"_third_{self._format_metric_for_ckpt_name(third_click)}"
             f"_final_{self._format_metric_for_ckpt_name(final_iter)}"
         )
@@ -1074,12 +1088,17 @@ class Trainer:
         self._maybe_save_topk_dice_checkpoints(out_dict)
         self._reset_meters(curr_phases)
         if (
-            "Dice/val_second_click" in out_dict
+            "Dice/val_first_click" in out_dict
+            and "Dice/val_second_click" in out_dict
             and "Dice/val_third_click" in out_dict
             and "Dice/val_final_iter" in out_dict
         ):
             logging.info(
-                "Val avg second-click dice: %.6f | avg third-click dice: %.6f | avg final-iter dice: %.6f",
+                (
+                    "Val avg first-click dice: %.6f | avg second-click dice: %.6f | "
+                    "avg third-click dice: %.6f | avg final-iter dice: %.6f"
+                ),
+                out_dict["Dice/val_first_click"],
                 out_dict["Dice/val_second_click"],
                 out_dict["Dice/val_third_click"],
                 out_dict["Dice/val_final_iter"],
