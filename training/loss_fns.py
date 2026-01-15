@@ -4,7 +4,6 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
-from collections import defaultdict
 from typing import Dict, List
 
 import torch
@@ -217,11 +216,14 @@ class MultiStepMultiMasksAndIous(nn.Module):
             torch.distributed.all_reduce(num_objects)
         num_objects = torch.clamp(num_objects / get_world_size(), min=1).item()
 
-        losses = defaultdict(int)
+        losses = {}
         for outs, targets in zip(outs_batch, targets_batch):
             cur_losses = self._forward(outs, targets, num_objects)
             for k, v in cur_losses.items():
-                losses[k] += v
+                if k not in losses:
+                    losses[k] = v.clone()
+                else:
+                    losses[k] += v
 
         return losses
 
@@ -250,12 +252,13 @@ class MultiStepMultiMasksAndIous(nn.Module):
         assert len(object_score_logits_list) == len(ious_list)
 
         # accumulate the loss over prediction steps
+        base_tensor = src_masks_list[0]
         losses = {
-            "loss_mask": 0,
-            "loss_dice": 0,
-            "loss_iou": 0,
-            "loss_class": 0,
-            "loss_click_transform": 0,
+            "loss_mask": base_tensor.new_zeros(()),
+            "loss_dice": base_tensor.new_zeros(()),
+            "loss_iou": base_tensor.new_zeros(()),
+            "loss_class": base_tensor.new_zeros(()),
+            "loss_click_transform": base_tensor.new_zeros(()),
         }
         prev_selected_logits = None
         for step_index, (src_masks, ious, object_score_logits) in enumerate(

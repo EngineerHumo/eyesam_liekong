@@ -313,9 +313,9 @@ class SAM2Base(torch.nn.Module):
             sam_point_labels = point_inputs["point_labels"]
             assert sam_point_coords.size(0) == B and sam_point_labels.size(0) == B
         else:
-            # If no points are provide, pad with an empty point (with label -1)
-            sam_point_coords = torch.zeros(B, 1, 2, device=device)
-            sam_point_labels = -torch.ones(B, 1, dtype=torch.int32, device=device)
+            # No point prompts: keep empty so we don't inject padding points.
+            sam_point_coords = torch.empty(B, 0, 2, device=device)
+            sam_point_labels = torch.empty(B, 0, dtype=torch.int32, device=device)
 
         # b) Handle mask prompts
         if mask_inputs is not None:

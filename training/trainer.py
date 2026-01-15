@@ -850,9 +850,8 @@ class Trainer:
         if epoch in existing_epochs:
             return
 
-        dice_sum = second_click + third_click
         should_save = len(self.best_dice_checkpoints) < 10 or any(
-            dice_sum > item.get("dice_second_third_sum", float("-inf"))
+            first_click > item.get("dice_first_click", float("-inf"))
             for item in self.best_dice_checkpoints
         )
         if not should_save:
@@ -867,10 +866,9 @@ class Trainer:
         self.save_checkpoint(epoch, checkpoint_names=[ckpt_name])
 
         entry["path"] = os.path.join(self.checkpoint_conf.save_dir, f"{ckpt_name}.pt")
-        entry["dice_second_third_sum"] = dice_sum
         self.best_dice_checkpoints.append(entry)
         self.best_dice_checkpoints.sort(
-            key=lambda item: item.get("dice_second_third_sum", 0.0), reverse=True
+            key=lambda item: item.get("dice_first_click", 0.0), reverse=True
         )
 
         while len(self.best_dice_checkpoints) > 10:
