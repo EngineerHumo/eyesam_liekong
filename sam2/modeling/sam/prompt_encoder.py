@@ -84,7 +84,7 @@ class PromptEncoder(nn.Module):
     ) -> torch.Tensor:
         """Embeds point prompts."""
         points = points + 0.5  # Shift to center of pixel
-        if pad:
+        if pad and points.shape[1] > 0:
             padding_point = torch.zeros((points.shape[0], 1, 2), device=points.device)
             padding_label = -torch.ones((labels.shape[0], 1), device=labels.device)
             points = torch.cat([points, padding_point], dim=1)
