@@ -489,10 +489,9 @@ class Trainer:
         if phase == Phase.VAL:
             dice_metrics = self._compute_val_dice_metrics(outputs, targets)
             if dice_metrics is not None:
-                if "first_click" in dice_metrics:
-                    step_losses["Dice/val_first_click"] = dice_metrics["first_click"]
-                if "final_iter" in dice_metrics:
-                    step_losses["Dice/val_final_iter"] = dice_metrics["final_iter"]
+                first_click_dice, final_iter_dice = dice_metrics
+                step_losses["Dice/val_first_click"] = first_click_dice
+                step_losses["Dice/val_final_iter"] = final_iter_dice
 
         if step % self.logging_conf.log_scalar_frequency == 0:
             self.logger.log(
@@ -530,7 +529,7 @@ class Trainer:
 
     def _compute_val_dice_metrics(
         self, outputs: List[Dict[str, torch.Tensor]], targets: torch.Tensor
-    ) -> Optional[Dict[str, torch.Tensor]]:
+    ) -> Optional[Tuple[torch.Tensor, torch.Tensor]]:
         if not outputs:
             return None
 
@@ -542,8 +541,6 @@ class Trainer:
                 pred_steps = frame_out.get("multistep_pred_masks")
             if pred_steps is None or pred_steps.dim() != 4:
                 continue
-            if pred_steps.size(1) < 1:
-                continue
 
             frame_targets = frame_targets.float()
             first_pred = pred_steps[:, 0]
@@ -554,10 +551,7 @@ class Trainer:
         if not first_dices:
             return None
 
-        metrics = {"first_click": torch.stack(first_dices).mean()}
-        if final_dices:
-            metrics["final_iter"] = torch.stack(final_dices).mean()
-        return metrics
+        return torch.stack(first_dices).mean(), torch.stack(final_dices).mean()
 
     def _compute_dice(
         self, pred_logits: torch.Tensor, target_masks: torch.Tensor
@@ -600,7 +594,9 @@ class Trainer:
         pred_mask = torch.sigmoid(pred_masks[obj_index]).detach().float().cpu()
         pred_mask = pred_mask.clamp(0.0, 1.0)
 
-        gt_mask = batch.masks[frame_idx, obj_index].detach().float().cpu().unsqueeze(0)
+        gt_mask = (
+            batch.masks[frame_idx, obj_index].detach().float().cpu().unsqueeze(0)
+        )
         gt_mask = gt_mask.clamp(0.0, 1.0)
 
         pred_vis = pred_mask.repeat(3, 1, 1)
@@ -614,7 +610,9 @@ class Trainer:
                 point_coords = point_inputs.get("point_coords")
                 point_labels = point_inputs.get("point_labels")
                 if point_coords is not None and point_labels is not None:
-                    point_coords = point_coords[obj_index].detach().float().cpu()
+                    point_coords = (
+                        point_coords[obj_index].detach().float().cpu()
+                    )
                     point_labels = (
                         point_labels[obj_index].detach().to(torch.int32).cpu()
                     )
@@ -644,10 +642,8 @@ class Trainer:
             y = int(round(coord[1].item()))
             if x < 0 or x >= width or y < 0 or y >= height:
                 continue
-            color = (
-                np.array([0.0, 1.0, 0.0])
-                if int(label.item()) == 1
-                else np.array([1.0, 0.0, 0.0])
+            color = np.array([0.0, 1.0, 0.0]) if int(label.item()) == 1 else np.array(
+                [1.0, 0.0, 0.0]
             )
             x0 = max(0, x - radius)
             x1 = min(width - 1, x + radius)
@@ -718,9 +714,7 @@ class Trainer:
         num_videos = batch.img_batch.shape[1]
         for frame_idx in range(num_frames):
             obj_to_frame_idx = batch.obj_to_frame_idx[frame_idx]
-            frame_targets = (
-                batch.masks[frame_idx].detach().float().cpu().clamp(0.0, 1.0)
-            )
+            frame_targets = batch.masks[frame_idx].detach().float().cpu().clamp(0.0, 1.0)
             frame_outputs = outputs[frame_idx]
             pred_steps = frame_outputs.get("multistep_pred_masks_high_res")
             if pred_steps is None:
@@ -755,8 +749,8 @@ class Trainer:
                         ("first_click", pred_first),
                         ("final_iter", pred_final),
                     ]:
-                        pred_vis = (
-                            torch.sigmoid(pred_mask).float().cpu().clamp(0.0, 1.0)
+                        pred_vis = torch.sigmoid(pred_mask).float().cpu().clamp(
+                            0.0, 1.0
                         )
                         if pred_vis.dim() == 2:
                             pred_vis = pred_vis.unsqueeze(0)
@@ -813,18 +807,20 @@ class Trainer:
         return f"{value:.6f}".replace(".", "p")
 
     def _maybe_save_topk_dice_checkpoints(self, out_dict: Mapping[str, Any]) -> None:
-        if "Dice/val_first_click" not in out_dict:
+        if (
+            "Dice/val_first_click" not in out_dict
+            or "Dice/val_final_iter" not in out_dict
+        ):
             return
         first_click = float(out_dict["Dice/val_first_click"])
-        final_iter = out_dict.get("Dice/val_final_iter")
+        final_iter = float(out_dict["Dice/val_final_iter"])
         epoch = int(self.epoch + 1)
 
         entry = {
             "epoch": epoch,
             "dice_first_click": first_click,
+            "dice_final_iter": final_iter,
         }
-        if final_iter is not None:
-            entry["dice_final_iter"] = float(final_iter)
 
         existing_epochs = {item.get("epoch") for item in self.best_dice_checkpoints}
         if epoch in existing_epochs:
@@ -837,7 +833,10 @@ class Trainer:
         if not should_save:
             return
 
-        ckpt_name = f"best_dice_epoch_{epoch:04d}_first_{self._format_metric_for_ckpt_name(first_click)}"
+        ckpt_name = (
+            f"best_dice_epoch_{epoch:04d}_first_{self._format_metric_for_ckpt_name(first_click)}"
+            f"_final_{self._format_metric_for_ckpt_name(final_iter)}"
+        )
         self.save_checkpoint(epoch, checkpoint_names=[ckpt_name])
 
         entry["path"] = os.path.join(self.checkpoint_conf.save_dir, f"{ckpt_name}.pt")
@@ -1060,15 +1059,15 @@ class Trainer:
             out_dict.update(self._get_trainer_state(phase))
         self._maybe_save_topk_dice_checkpoints(out_dict)
         self._reset_meters(curr_phases)
-        if "Dice/val_first_click" in out_dict:
-            log_parts = [
-                f"Val avg first-click dice: {out_dict['Dice/val_first_click']:.6f}"
-            ]
-            if "Dice/val_final_iter" in out_dict:
-                log_parts.append(
-                    f"avg final-iter dice: {out_dict['Dice/val_final_iter']:.6f}"
-                )
-            logging.info(" | ".join(log_parts))
+        if (
+            "Dice/val_first_click" in out_dict
+            and "Dice/val_final_iter" in out_dict
+        ):
+            logging.info(
+                "Val avg first-click dice: %.6f | avg final-iter dice: %.6f",
+                out_dict["Dice/val_first_click"],
+                out_dict["Dice/val_final_iter"],
+            )
         logging.info(f"Meters: {out_dict}")
         return out_dict
 
