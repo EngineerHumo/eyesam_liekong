@@ -68,6 +68,7 @@ trainer:
   _target_: training.trainer.Trainer
   mode: train
   max_epochs: ${times:${scratch.num_epochs},${scratch.phases_per_epoch}}
+  val_dice_mode: single_pass
   accelerator: cuda
   seed_value: 123
 
@@ -196,7 +197,6 @@ trainer:
     prob_to_use_box_input_for_train: 0.0
     prob_to_use_box_input_for_eval: 0.0
     force_pt_input_for_single_frame: false
-    use_mask_input_for_init_cond_frames: false
     prob_to_sample_from_gt_for_train: 0.1  # with a small prob, sampling correction points from GT mask instead of prediction errors
     num_frames_to_correct_for_train: 0  # no iterative correction
     num_frames_to_correct_for_eval: 0  # no iterative correction
