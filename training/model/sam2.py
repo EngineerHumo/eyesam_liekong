@@ -311,9 +311,14 @@ class SAM2Train(SAM2Base):
         # Prepare mask or point inputs on initial conditioning frames
         backbone_out["mask_inputs_per_frame"] = {}  # {frame_idx: <input_masks>}
         backbone_out["point_inputs_per_frame"] = {}  # {frame_idx: <input_points>}
+        use_mask_input_for_init_cond_frames = (
+            self.use_mask_input_for_init_cond_frames
+        )
+        if num_frames == 1 and not use_pt_input and not self.force_pt_input_for_single_frame:
+            use_mask_input_for_init_cond_frames = False
         for t in init_cond_frames:
             if not use_pt_input:
-                if self.use_mask_input_for_init_cond_frames:
+                if use_mask_input_for_init_cond_frames:
                     backbone_out["mask_inputs_per_frame"][t] = gt_masks_per_frame[t]
             else:
                 # During training # P(box) = prob_to_use_pt_input * prob_to_use_box_input
