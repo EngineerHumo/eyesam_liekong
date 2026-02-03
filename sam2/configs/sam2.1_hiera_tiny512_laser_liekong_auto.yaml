@@ -68,6 +68,7 @@ trainer:
   _target_: training.trainer.Trainer
   mode: train
   max_epochs: ${times:${scratch.num_epochs},${scratch.phases_per_epoch}}
+  val_dice_mode: single_pass
   accelerator: cuda
   seed_value: 123
 

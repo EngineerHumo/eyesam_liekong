@@ -168,6 +168,7 @@ class Trainer:
         optim_overrides: Optional[List[Dict[str, Any]]] = None,
         meters: Optional[Dict[str, Any]] = None,
         loss: Optional[Dict[str, Any]] = None,
+        val_dice_mode: str = "iterative",
     ):
 
         self._setup_env_variables(env_variables)
@@ -183,6 +184,7 @@ class Trainer:
         self.optim_conf = OptimConf(**optim) if optim is not None else None
         self.meters_conf = meters
         self.loss_conf = loss
+        self.val_dice_mode = val_dice_mode
         distributed = DistributedConf(**distributed or {})
         cuda = CudaConf(**cuda or {})
         self.where = 0.0
@@ -489,14 +491,7 @@ class Trainer:
         if phase == Phase.VAL:
             dice_metrics = self._compute_val_dice_metrics(outputs, targets)
             if dice_metrics is not None:
-                if "first_click" in dice_metrics:
-                    step_losses["Dice/val_first_click"] = dice_metrics["first_click"]
-                if "second_click" in dice_metrics:
-                    step_losses["Dice/val_second_click"] = dice_metrics["second_click"]
-                if "third_click" in dice_metrics:
-                    step_losses["Dice/val_third_click"] = dice_metrics["third_click"]
-                if "final_iter" in dice_metrics:
-                    step_losses["Dice/val_final_iter"] = dice_metrics["final_iter"]
+                self._log_val_dice_metrics(step_losses, dice_metrics)
 
         if step % self.logging_conf.log_scalar_frequency == 0:
             self.logger.log(
@@ -537,6 +532,26 @@ class Trainer:
     ) -> Optional[Dict[str, torch.Tensor]]:
         if not outputs:
             return None
+        if self.val_dice_mode == "single_pass":
+            single_dices = []
+            for frame_out, frame_targets in zip(outputs, targets):
+                pred_masks = frame_out.get("pred_masks_high_res")
+                if pred_masks is None:
+                    pred_masks = frame_out.get("pred_masks")
+                if pred_masks is None:
+                    continue
+                if pred_masks.dim() == 4:
+                    if pred_masks.size(1) >= 1:
+                        pred_masks = pred_masks[:, 0]
+                    else:
+                        continue
+                if pred_masks.dim() != 3:
+                    continue
+                frame_targets = frame_targets.float()
+                single_dices.append(self._compute_dice(pred_masks, frame_targets))
+            if not single_dices:
+                return None
+            return {"single": torch.stack(single_dices).mean()}
 
         first_dices = []
         second_dices = []
@@ -574,6 +589,32 @@ class Trainer:
         if final_dices:
             metrics["final_iter"] = torch.stack(final_dices).mean()
         return metrics
+
+    def _log_val_dice_metrics(
+        self, step_losses: Dict[str, torch.Tensor], dice_metrics: Dict[str, torch.Tensor]
+    ) -> None:
+        if self.val_dice_mode == "single_pass":
+            if "single" in dice_metrics:
+                step_losses["Dice/val_single"] = dice_metrics["single"]
+            return
+        if "first_click" in dice_metrics:
+            step_losses["Dice/val_first_click"] = dice_metrics["first_click"]
+        if "second_click" in dice_metrics:
+            step_losses["Dice/val_second_click"] = dice_metrics["second_click"]
+        if "third_click" in dice_metrics:
+            step_losses["Dice/val_third_click"] = dice_metrics["third_click"]
+        if "final_iter" in dice_metrics:
+            step_losses["Dice/val_final_iter"] = dice_metrics["final_iter"]
+
+    def _get_primary_dice_key(self) -> str:
+        if self.val_dice_mode == "single_pass":
+            return "Dice/val_single"
+        return "Dice/val_first_click"
+
+    def _get_primary_dice_entry_key(self) -> str:
+        if self.val_dice_mode == "single_pass":
+            return "dice_single"
+        return "dice_first_click"
 
     def _compute_dice(
         self, pred_logits: torch.Tensor, target_masks: torch.Tensor
@@ -829,9 +870,10 @@ class Trainer:
         return f"{value:.6f}".replace(".", "p")
 
     def _maybe_save_topk_dice_checkpoints(self, out_dict: Mapping[str, Any]) -> None:
-        if "Dice/val_first_click" not in out_dict:
+        primary_key = self._get_primary_dice_key()
+        if primary_key not in out_dict:
             return
-        first_click = float(out_dict["Dice/val_first_click"])
+        primary_value = float(out_dict[primary_key])
         second_click = out_dict.get("Dice/val_second_click")
         third_click = out_dict.get("Dice/val_third_click")
         final_iter = out_dict.get("Dice/val_final_iter")
@@ -839,7 +881,7 @@ class Trainer:
 
         entry = {
             "epoch": epoch,
-            "dice_first_click": first_click,
+            self._get_primary_dice_entry_key(): primary_value,
         }
         if second_click is not None:
             entry["dice_second_click"] = float(second_click)
@@ -853,19 +895,24 @@ class Trainer:
             return
 
         should_save = len(self.best_dice_checkpoints) < 10 or any(
-            first_click > item.get("dice_first_click", float("-inf"))
+            primary_value > item.get(self._get_primary_dice_entry_key(), float("-inf"))
             for item in self.best_dice_checkpoints
         )
         if not should_save:
             return
 
-        ckpt_name = f"best_dice_epoch_{epoch:04d}_first_{self._format_metric_for_ckpt_name(first_click)}"
+        ckpt_name = (
+            f"best_dice_epoch_{epoch:04d}_"
+            f"{self._get_primary_dice_entry_key()}_"
+            f"{self._format_metric_for_ckpt_name(primary_value)}"
+        )
         self.save_checkpoint(epoch, checkpoint_names=[ckpt_name])
 
         entry["path"] = os.path.join(self.checkpoint_conf.save_dir, f"{ckpt_name}.pt")
         self.best_dice_checkpoints.append(entry)
         self.best_dice_checkpoints.sort(
-            key=lambda item: item.get("dice_first_click", 0.0), reverse=True
+            key=lambda item: item.get(self._get_primary_dice_entry_key(), 0.0),
+            reverse=True,
         )
 
         while len(self.best_dice_checkpoints) > 10:
@@ -1082,7 +1129,12 @@ class Trainer:
             out_dict.update(self._get_trainer_state(phase))
         self._maybe_save_topk_dice_checkpoints(out_dict)
         self._reset_meters(curr_phases)
-        if "Dice/val_first_click" in out_dict:
+        if self.val_dice_mode == "single_pass":
+            if "Dice/val_single" in out_dict:
+                logging.info(
+                    "Val avg single-pass dice: %.6f", out_dict["Dice/val_single"]
+                )
+        elif "Dice/val_first_click" in out_dict:
             log_parts = [
                 f"Val avg first-click dice: {out_dict['Dice/val_first_click']:.6f}"
             ]
