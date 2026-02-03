@@ -33,6 +33,7 @@ class SAM2Train(SAM2Base):
         prob_to_use_box_input_for_train=0.0,
         prob_to_use_box_input_for_eval=0.0,
         force_pt_input_for_single_frame=True,
+        use_mask_input_for_init_cond_frames=True,
         # if it is greater than 1, we interactive point sampling in the 1st frame and other randomly selected frames
         num_frames_to_correct_for_train=1,  # default: only iteratively sample on first frame
         num_frames_to_correct_for_eval=1,  # default: only iteratively sample on first frame
@@ -86,6 +87,7 @@ class SAM2Train(SAM2Base):
         self.prob_to_use_pt_input_for_eval = prob_to_use_pt_input_for_eval
         self.prob_to_use_box_input_for_eval = prob_to_use_box_input_for_eval
         self.force_pt_input_for_single_frame = force_pt_input_for_single_frame
+        self.use_mask_input_for_init_cond_frames = use_mask_input_for_init_cond_frames
         if prob_to_use_pt_input_for_train > 0 or prob_to_use_pt_input_for_eval > 0:
             logging.info(
                 f"Training with points (sampled from masks) as inputs with p={prob_to_use_pt_input_for_train}"
@@ -311,7 +313,8 @@ class SAM2Train(SAM2Base):
         backbone_out["point_inputs_per_frame"] = {}  # {frame_idx: <input_points>}
         for t in init_cond_frames:
             if not use_pt_input:
-                backbone_out["mask_inputs_per_frame"][t] = gt_masks_per_frame[t]
+                if self.use_mask_input_for_init_cond_frames:
+                    backbone_out["mask_inputs_per_frame"][t] = gt_masks_per_frame[t]
             else:
                 # During training # P(box) = prob_to_use_pt_input * prob_to_use_box_input
                 use_box_input = self.rng.random() < prob_to_use_box_input
