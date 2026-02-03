@@ -191,19 +191,28 @@ trainer:
 
     ####### Training specific params #######
     # box/point input and corrections
-    prob_to_use_pt_input_for_train: 1.0
-    prob_to_use_pt_input_for_eval: 1.0
+    prob_to_use_pt_input_for_train: 0.0
+    prob_to_use_pt_input_for_eval: 0.0
     prob_to_use_box_input_for_train: 0.0
     prob_to_use_box_input_for_eval: 0.0
+    force_pt_input_for_single_frame: false
+    use_mask_input_for_init_cond_frames: false
     prob_to_sample_from_gt_for_train: 0.1  # with a small prob, sampling correction points from GT mask instead of prediction errors
-    num_frames_to_correct_for_train: 1  # single-frame data, only correct the first frame
-    num_frames_to_correct_for_eval: 1  # only iteratively sample on first frame
+    num_frames_to_correct_for_train: 0  # no iterative correction
+    num_frames_to_correct_for_eval: 0  # no iterative correction
     rand_frames_to_correct_for_train: False  # single-frame data, no random correction frames
     add_all_frames_to_correct_as_cond: True  # when a frame receives a correction click, it becomes a conditioning frame (even if it's not initially a conditioning frame)
     # maximum 1 initial conditioning frame
     num_init_cond_frames_for_train: 1
     rand_init_cond_frames_for_train: False  # single-frame data, no random conditioning frames
     num_correction_pt_per_frame: 0
+    init_pt_sampling_for_train: center_biased_uniform
+    init_pt_sampling_for_eval: center_biased_uniform
+    init_pt_sampling_center_prob: 0.7
+    init_pt_sampling_use_area_norm: true
+    pt_sampling_for_train: largest_error_center
+    pt_sampling_largest_region_prob_for_train: 0.8
+    pt_sampling_largest_region_prefer: largest
     use_act_ckpt_iterative_pt_sampling: false
     
 
@@ -328,11 +337,17 @@ trainer:
         loss_dice: 1
         loss_iou: 1
         loss_class: 1
+        loss_click_transform: 2.0
       supervise_all_iou: true
       iou_use_l1_loss: true
       pred_obj_scores: true
       focal_gamma_obj_score: 0.0
       focal_alpha_obj_score: -1.0
+      click_loss_start_step: 1
+      click_loss_sigma_base: 60.0
+      click_loss_sigma_decay: 6.0
+      click_loss_min_sigma: 6.0
+      click_transform_loss_start_step: 1
 
   distributed:
     backend: nccl #  gloo or nccl
